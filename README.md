@@ -1,31 +1,35 @@
 # 🎬 SanusiPlay — Nonton & Cari Video Tanpa Iklan
 
 **Aplikasi video independen** yang terhubung ke YouTube: bisa mencari video, memutar video,
-dan trending harian — lengkap dengan **🛡️ Perisai Sanusi** (sistem blokir iklan).
+dan trending harian — lengkap dengan **🛡️ Perisai Mutlak** (sistem blokir iklan tiga lapis).
 
-> Hak cipta © **2026 Sanusi** · Berlogo **AMIK Serang** (warna kebesaran navy `#0f172a` + biru `#3b82f6`)
+> Hak cipta © **2026 Sanusi** · Berlogo **AMIK Serang** (warna kebesaran navy `#0f172a` + biru `#2563eb`)
 
 ## ✨ Fitur
 
 | Fitur | Keterangan |
 |---|---|
 | 🔍 Pencarian video | Lewat API publik Piped & Invidious — **tanpa kunci API**, dengan failover 3 server |
-| ▶ Pemutaran video | **Mode Iklan-Nol** (stream langsung ke `<video>`) → otomatis mundur ke **embed resmi** `youtube-nocookie` |
-| 🛡️ Perisai Sanusi | CSP memblokir semua domain iklan/pelacak (`doubleclick`, `googlesyndication`, `pagead2`, dll) sebelum tersambung; pelanggaran dihitung tampil di aplikasi |
+| ▶ Pemutaran video | **Hanya jalur bebas iklan**: satu aliran gabungan, atau dua aliran (video-saja + audio-saja) yang disinkronkan. **Pemutar resmi YouTube beriklan dihapus total** |
+| 🛡️ Perisai Mutlak | **Tiga lapis**: CSP (`frame-src 'none'` + blokir domain iklan) → penjaga jaringan `fetch()` → pencegat Service Worker. Pelanggaran dihitung & tampil di aplikasi |
 | 🔥 Trending | Harian per negara (Indonesia default) |
 | 🔖 Simpanan | Simpan video favorit di perangkat (localStorage) |
 | 🎨 Tema | Gelap / Terang / Ikut sistem |
 | 📲 PWA | Pasang di layar utama, shell aplikasi tetap jalan luring (video tetap butuh internet) |
 
-## ⚙️ Cara kerja perisai iklan
+## ⚙️ Cara kerja Perisai Mutlak (nol iklan)
 
-1. **Content-Security-Policy** di `index.html` hanya mengizinkan domain YouTube resmi +
-   3 server API. Semua domain iklan & pelacak **diblokir sebelum permintaan berangkat**.
-2. **Hanya `youtube-nocookie.com`** yang boleh menjadi bingkai — tak ada ruang untuk banner.
-3. **Mode Iklan-Nol**: video diputar dari stream publik langsung ke pemutar HTML —
-   sistem iklan YouTube tidak dilalui sama sekali.
-4. **Kejujuran**: pada Mode Resmi, iklan pre-roll yang muncul *di dalam* bingkai dikendalikan
-   YouTube dan tak bisa disaring dari luar frame.
+1. **CSP `frame-src 'none'`** — *semua* bingkai dilarang mutlak. Pemutar YouTube yang
+   menyiarkan iklan pre-roll **tidak mungkin hidup**, sekalipun ada celah di dalam kode.
+2. **Penjaga jaringan (JavaScript)** — `window.fetch` dibungkus; setiap permintaan ke
+   domain iklan/pelacak (`doubleclick`, `googlesyndication`, `pagead`, dll) ditolak.
+3. **Pencegat Service Worker** — permintaan iklan yang lolos pun diputus di level
+   jaringan perangkat (dijawab `204`), bahkan sebelum meninggalkan ponsel.
+4. **Jalur putar tanpa iklan** — video diputar dari stream publik langsung ke elemen
+   `<video>`/`<audio>`; bila tak ada aliran gabungan, dua aliran video & audio
+   disinkronkan (cari posisi, volume, senyap, kecepatan) agar tayangan tetap mulus.
+5. **Kejujuran** — bila suatu tayangan benar-benar tak punya jalur bebas iklan, aplikasi
+   berkata jujur dan memberi tombol **Coba lagi**, bukan diam-diam menyalakan iklan.
 
 ## 🚀 Menjalankan
 
@@ -42,8 +46,8 @@ python3 -m http.server 8000
 ```bash
 node tools/make-icons.mjs     # ukir logo (SVG → PNG, sharp)
 node tools/verify-icons.mjs   # verifikasi piksel logo
-node tools/test-app.mjs       # 44+ asersi jsdom (alur cari, putar, simpan, perisai)
-node tools/cross-check.mjs    # silang-periksa struktur HTML/CSS/JS
+node tools/test-app.mjs       # 116 asersi jsdom (cari, putar, perisai 3 lapis, failover)
+node tools/cross-check.mjs    # 61 asersi silang-periksa struktur HTML/CSS/JS
 ```
 
 `tools/node_modules` adalah simbolik modul dari proyek KasKu (sharp & jsdom).
