@@ -1,5 +1,7 @@
-/* SanusiPlay — service worker: simpan-while-revalidate agar bisa dibuka luring */
-const CACHE = 'sanusiplay-v1.0.0';
+/* SanusiPlay — service worker: simpan-while-revalidate agar bisa dibuka luring
+   + PENCEGAT IKLAN (lapis ke-3): permintaan ke domain iklan diputus total. */
+const CACHE = 'sanusiplay-v1.1.0';
+const AD_PATTERN = /doubleclick|googlesyndication|googleadservices|pagead|adservice|adnxs|adsystem|adtech|taboola|outbrain|criteo|pubmatic|rubiconproject|openx|smartadserver|adform|moatads|scorecardresearch|quantserve|hotjar|facebook\.net|googletagmanager|google-analytics|adsrvr|adcolony|unityads|applovin|inmobi|vungle/i;
 const ASSETS = [
   './',
   './index.html',
@@ -31,6 +33,12 @@ self.addEventListener('fetch', e => {
   const req = e.request;
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
+
+  // LAPIS 3 — PENCEGAT IKLAN: putus permintaan ke domain iklan/pelacak
+  if (AD_PATTERN.test(url.href)) {
+    e.respondWith(new Response('', { status: 204, statusText: 'Blocked by Perisai Mutlak Sanusi' }));
+    return;
+  }
 
   // Data video langsung dari jaringan (jangan pernah di-cache — URL stream kedaluwarsa)
   if (url.origin !== self.location.origin) return;
