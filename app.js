@@ -48,7 +48,7 @@ function saveJSON(key, val) {
 }
 
 /* ---------------- Status aplikasi ---------------- */
-const state = { view: 'home', query: '', results: [], trendCache: {}, lastHealthy: null, playing: null, details: null, descOpen: false, plans: [], planIdx: 0 };
+const state = { view: 'home', query: '', results: [], trendCache: {}, lastHealthy: null, playing: null, details: null, descOpen: false, plans: [], planIdx: 0, autoRetried: false };
 
 /* ---------------- Utilitas ---------------- */
 const NF = new Intl.NumberFormat('id-ID');
@@ -474,16 +474,21 @@ function mountPair(plan, onFail) {
   return true;
 }
 /* Semua jalur gagal → kartu galat (BUKAN pemutar YouTube beriklan) */
-function showStreamError(det) {
+function showStreamError(det, reason = 'path') {
   setBadge('error');
   const stage = $('playerStage');
   stage.dataset.mode = 'error';
-  const hint = det && det.streamCount
-    ? 'Jalur bebas iklan terputus — tautan stream mungkin kedaluwarsa atau jaringan tersendat.'
-    : 'Server tidak mengirim jalur video apa pun untuk tayangan ini.';
+  const serverDown = reason === 'server';
+  const title = serverDown ? 'Server sedang sibuk' : 'Tidak ada jalur bebas iklan';
+  const hint = serverDown
+    ? 'Semua server video sedang diblokir YouTube atau sedang pulih — inilah risiko API publik. '
+      + 'Coba lagi beberapa saat lagi.'
+    : (det && det.streamCount
+      ? 'Jalur bebas iklan terputus — tautan stream mungkin kedaluwarsa atau jaringan tersendat.'
+      : 'Server tidak mengirim jalur video apa pun untuk tayangan ini.');
   stage.innerHTML = `<div class="stage-error">
       <span class="em">🛡️</span>
-      <b>Tidak ada jalur bebas iklan</b>
+      <b>${esc(title)}</b>
       <small>${esc(hint)}</small>
       <small>Perisai Mutlak menolak memutar lewat pemutar YouTube yang beriklan, agar <b>tak satu pun iklan lolos</b>.</small>
       <div class="btn-col">
@@ -504,6 +509,7 @@ function tryPlan() {
   if (!ok) onFail();
 }
 async function startPlayback(meta) {
+  if (state.playing !== meta.id) state.autoRetried = false; // video baru → ulang-otomatis dipulihkan
   state.playing = meta.id;
   state.descOpen = false;
   state.plans = [];
@@ -543,8 +549,20 @@ async function startPlayback(meta) {
 
   state.plans = (det && det.plans) ? det.plans.slice() : [];
   state.planIdx = 0;
-  if (state.plans.length) tryPlan();
-  else showStreamError(det);
+  if (state.plans.length) {
+    state.autoRetried = false;
+    tryPlan();
+    return;
+  }
+  if (!det && !state.autoRetried) {
+    // Server sedang lumpuh → SATU kali coba-ulang otomatis sebelum menyerah jujur
+    state.autoRetried = true;
+    $('playerStage').innerHTML =
+      `<div class="stage-loading"><span class="spinner"></span><small>Server sedang sibuk — mencoba ulang otomatis…</small></div>`;
+    setTimeout(() => { if (state.playing === meta.id) startPlayback(videoMetaFromId(meta.id)); }, 1500);
+    return;
+  }
+  showStreamError(det, det ? 'none' : 'server'); // det=null → semua server tumbang
 }
 function openPlayer(meta) {
   if (!meta || !meta.id) return;
@@ -649,7 +667,10 @@ function wire() {
     if (retry) {
       if (retry.dataset.retry === 'trend') loadTrending(true);
       if (retry.dataset.retry === 'search') doSearch(state.query);
-      if (retry.dataset.retry === 'stream' && state.playing) startPlayback(videoMetaFromId(state.playing));
+      if (retry.dataset.retry === 'stream' && state.playing) {
+        state.autoRetried = false; // coba-ulang manual diberi jatah coba-ulang otomatis
+        startPlayback(videoMetaFromId(state.playing));
+      }
       return;
     }
     const card = e.target.closest('[data-vid]');
