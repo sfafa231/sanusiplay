@@ -46,8 +46,9 @@ python3 -m http.server 8000
 ```bash
 node tools/make-icons.mjs     # ukir logo (SVG → PNG, sharp)
 node tools/verify-icons.mjs   # verifikasi piksel logo
-node tools/test-app.mjs       # 116 asersi jsdom (cari, putar, perisai 3 lapis, failover)
+node tools/test-app.mjs       # 120 asersi jsdom (cari, putar, perisai 3 lapis, failover)
 node tools/cross-check.mjs    # 61 asersi silang-periksa struktur HTML/CSS/JS
+node tools/live-check.mjs     # uji integrasi LIVE (API sungguhan, tanpa bingkai YouTube)
 ```
 
 `tools/node_modules` adalah simbolik modul dari proyek KasKu (sharp & jsdom).
