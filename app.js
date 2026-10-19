@@ -12,7 +12,8 @@ const K = { pref: 'splay_pref_v1', saved: 'splay_saved_v1', shield: 'splay_shiel
 const INSTANCES = [
   { id: 'piped-coffee', type: 'piped', base: 'https://api.piped.private.coffee', label: 'Piped·Coffee' },
   { id: 'piped-ducks', type: 'piped', base: 'https://pipedapi.ducks.party', label: 'Piped·Ducks' },
-  { id: 'inv-f5', type: 'invidious', base: 'https://invidious.f5.si', label: 'Invidious·F5' }
+  { id: 'inv-f5', type: 'invidious', base: 'https://invidious.f5.si', label: 'Invidious·F5' },
+  { id: 'inv-nadeko', type: 'invidious', base: 'https://inv.nadeko.net', label: 'Invidious·Nadeko' }
 ];
 
 const TOPICS = [
@@ -294,9 +295,21 @@ const trendingVideos = region => tryInstances(inst =>
   `${inst.base}${inst.type === 'piped' ? '/trending?region=' : '/api/v1/trending?region='}${encodeURIComponent(region)}`
 ).then(({ inst, data }) => ({ inst, list: normList(inst, data) }));
 
-const getDetails = id => tryInstances(inst =>
-  `${inst.base}${inst.type === 'piped' ? '/streams/' : '/api/v1/videos/'}${id}`
-).then(({ inst, data }) => normDetails(inst, data, id));
+const getDetails = id => tryInstances(inst => {
+  const base = inst.base;
+  if (inst.type === 'piped') return `${base}/streams/${id}`;
+  const sep = base.includes('?') ? '&' : '?';
+  return `${base}/api/v1/videos/${id}${sep}local=true`;
+}).then(({ inst, data }) => {
+  // Validasi: kalau invidious tidak ada stream sama sekali → anggap gagal biar coba instance lain
+  if (inst.type === 'invidious') {
+    const s = collectStreams(inst, data);
+    if (!s.muxed.length && !s.video.length && !s.audio.length && !(data && data.streamCount)) {
+      throw new Error('no_streams');
+    }
+  }
+  return normDetails(inst, data, id);
+});
 
 /* ---------------- Render kartu video ---------------- */
 function cardHTML(v, opts = {}) {
