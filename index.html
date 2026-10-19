@@ -3,11 +3,13 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <!-- PERISAI IKLAN: hanya domain YouTube resmi & server API yang diizinkan.
-       Domain iklan/pelacak (doubleclick, googlesyndication, pagead, dll) DIBLOKIR total. -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; frame-src https://www.youtube-nocookie.com https://www.youtube.com; media-src 'self' https://*.googlevideo.com https://*.youtube.com; img-src 'self' data: https://i.ytimg.com https://*.ytimg.com https://*.ggpht.com https://*.googleusercontent.com https://api.piped.private.coffee https://pipedapi.ducks.party https://invidious.f5.si; connect-src 'self' https://api.piped.private.coffee https://pipedapi.ducks.party https://invidious.f5.si; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; form-action 'self'">
+  <!-- PERISAI MUTLAK v1.1.0 — tiga lapis pertahanan iklan.
+       Lapis 1 (CSP): SELURUH bingkai dilarang (frame-src 'none') → pemutar YouTube
+       beriklan TIDAK BISA hidup, sekalipun ada celah kode. Domain iklan/pelacak
+       (doubleclick, googlesyndication, pagead, dll) ditolak sebelum tersambung. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; frame-src 'none'; media-src 'self' https://*.googlevideo.com https://*.youtube.com https://*.odycdn.com https://*.piped.private.coffee https://*.ducks.party https://*.f5.si https://*.googleusercontent.com; img-src 'self' data: https://i.ytimg.com https://*.ytimg.com https://*.ggpht.com https://*.googleusercontent.com https://api.piped.private.coffee https://pipedapi.ducks.party https://invidious.f5.si; connect-src 'self' https://api.piped.private.coffee https://pipedapi.ducks.party https://invidious.f5.si; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; form-action 'self'">
   <meta name="theme-color" content="#0f172a">
-  <meta name="description" content="SanusiPlay — cari dan nonton video YouTube dengan perisai iklan. Ringan, rapi, dan jalan langsung dari browser. Dibuat oleh Sanusi.">
+  <meta name="description" content="SanusiPlay — cari dan nonton video YouTube dengan Perisai Mutlak: pemutar beriklan dimatikan total, video diputar lewat stream langsung tanpa iklan. Ringan, rapi, dibuat oleh Sanusi.">
   <meta name="author" content="Sanusi">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
@@ -31,7 +33,7 @@
       </span>
     </button>
     <div class="top-actions">
-      <span class="shield-badge" id="shieldBadge" title="Perisai Sanusi — iklan diblokir">
+      <span class="shield-badge" id="shieldBadge" title="Perisai Mutlak — iklan diblokir total, pemutar beriklan dimatikan">
         <svg viewBox="0 0 24 24" class="ic"><path d="M12 3l7 2.6v5.6c0 4.5-3 7.6-7 9-4-1.4-7-4.5-7-9V5.6z"/><path d="M9 12l2.2 2.2L15.5 10"/></svg>
         <b id="shieldCount">0</b>
       </span>
@@ -79,8 +81,8 @@
 
       <div class="card shield-card">
         <div class="card-head">
-          <h3>🛡️ Perisai Sanusi</h3>
-          <span class="status-chip on">AKTIF</span>
+          <h3>🛡️ Perisai Mutlak</h3>
+          <span class="status-chip on">3 LAPIS · AKTIF</span>
         </div>
         <div class="shield-stats">
           <div><b id="statAdBlocked">0</b><small>iklan/pelacak diblokir</small></div>
@@ -88,26 +90,27 @@
           <div><b id="statWhitelisted">4</b><small>domain diizinkan</small></div>
         </div>
         <p class="note">
-          <b>Cara kerja perisai:</b> kebijakan CSP memblokir semua domain iklan &amp; pelacak
-          (<i>doubleclick.net, googlesyndication, pagead2, googleadservices,</i> dll) bahkan
-          sebelum tersambung — hanya pemutar YouTube resmi yang diizinkan menjadi bingkai,
-          sehingga tidak ada ruang untuk banner iklan di dalam aplikasi.
+          <b>Tiga lapis pertahanan iklan:</b><br>
+          <b>1. Kebijakan CSP</b> — <i>semua</i> bingkai dilarang mutlak
+          (<code>frame-src 'none'</code>). Pemutar YouTube yang menyiarkan iklan
+          <b>tidak mungkin hidup</b>, sekalipun ada celah di dalam kode.<br>
+          <b>2. Penjaga jaringan</b> — setiap permintaan ke domain iklan/pelacak
+          (doubleclick, googlesyndication, pagead, dll) ditolak di dalam aplikasi.<br>
+          <b>3. Pencegat Service Worker</b> — permintaan iklan yang lolos pun diputus
+          di level jaringan perangkat, bahkan sebelum meninggalkan ponsel.
         </p>
-        <p class="note dim">Catatan jujur: pada <b>Mode Iklan-Nol</b> video diputar langsung
-          lewat stream — nol iklan mutlak. Pada <b>Mode Resmi</b>, iklan yang sesekali muncul
-          berasal dari pemutar YouTube di dalam bingkai tertutup dan dikendalikan YouTube.</p>
+        <p class="note dim">Karena pemutar resmi YouTube dimatikan total, iklan pre-roll
+          YouTube tidak punya tempat untuk muncul. Video diputar lewat stream
+          langsung (satu aliran gabungan, atau dua aliran video+audio yang disinkronkan)
+          → <b>nol iklan, tanpa kompromi</b>.</p>
       </div>
 
       <div class="card">
-        <div class="card-head"><h3>🎬 Mode Pemutar</h3></div>
-        <div class="seg" id="modeSeg">
-          <button type="button" data-mode="auto" class="active">Otomatis</button>
-          <button type="button" data-mode="shield">Iklan-Nol</button>
-          <button type="button" data-mode="official">Resmi</button>
-        </div>
-        <p class="note dim">Otomatis = pakai stream tanpa iklan bila tersedia, lalu mundur ke
-          pemutar resmi. Iklan-Nol = paksa stream (gagal = pemberitahuan). Resmi = selalu
-          embed youtube-nocookie.</p>
+        <div class="card-head"><h3>🎬 Pemutar Bebas Iklan</h3><span class="status-chip on">MUTLAK</span></div>
+        <p class="note">SanusiPlay hanya memutar video melalui <b>jalur stream langsung</b>.
+          Tidak ada mode pemutar resmi, tidak ada celah iklan. Bila suatu tayangan
+          kebetulan tidak punya jalur bebas iklan, aplikasi akan berkata jujur dan
+          memberi tombol <b>Coba lagi</b> — bukan diam-diam menyalakan iklan.</p>
       </div>
 
       <div class="card">
@@ -148,7 +151,7 @@
           <img src="./icons/icon-192.png" alt="Logo SanusiPlay" width="54" height="54">
           <div>
             <b>SanusiPlay</b>
-            <small id="aboutVersion">Versi 1.0.0</small>
+            <small id="aboutVersion">Versi 1.1.0</small>
           </div>
         </div>
         <ul class="about-list">
@@ -160,7 +163,7 @@
         </ul>
         <p class="note dim">SanusiPlay adalah klien video independen. Tidak berafiliasi,
           tidak didukung, dan tidak beraut dengan YouTube atau Google. Video diputar melalui
-          stream publik atau embed resmi YouTube. Semua hak cipta © 2026 Sanusi.</p>
+          jalur stream publik tanpa pemutar beriklan. Semua hak cipta © 2026 Sanusi.</p>
       </div>
     </section>
   </main>
