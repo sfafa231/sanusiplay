@@ -311,16 +311,30 @@ select:focus { border-color: var(--accent); }
   padding: 5px 10px; border-radius: 999px; white-space: nowrap;
 }
 .mode-badge.shield { background: rgba(34, 197, 94, .2); color: #86efac; border: 1px solid rgba(34, 197, 94, .5); }
-.mode-badge.official { background: rgba(59, 130, 246, .2); color: #93c5fd; border: 1px solid rgba(59, 130, 246, .5); }
+.mode-badge.error { background: rgba(239, 68, 68, .18); color: #fca5a5; border: 1px solid rgba(239, 68, 68, .5); }
 .mode-badge.wait { background: rgba(255, 255, 255, .14); color: #cbd5e1; }
 
 .player-stage { position: relative; aspect-ratio: 16 / 9; background: #000; }
 .player-stage video, .player-stage iframe {
   position: absolute; inset: 0; width: 100%; height: 100%; border: none; display: block;
 }
+.player-stage audio { display: none; }
 .stage-loading {
   position: absolute; inset: 0; display: flex; flex-direction: column;
   align-items: center; justify-content: center; gap: 10px; color: #94a3b8;
+}
+.stage-error {
+  position: absolute; inset: 0; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 7px; padding: 20px;
+  text-align: center; color: #e2e8f0; overflow-y: auto;
+}
+.stage-error .em { font-size: 32px; line-height: 1; }
+.stage-error b { font-size: 14.5px; }
+.stage-error small { color: #94a3b8; font-size: 12px; line-height: 1.5; max-width: 470px; }
+.stage-error small b { color: #cbd5e1; font-size: 12px; }
+.stage-error .btn-col {
+  display: flex; flex-direction: column; gap: 8px; margin-top: 8px;
+  width: min(260px, 78%);
 }
 .spinner {
   width: 34px; height: 34px; border-radius: 50%;
