@@ -5,7 +5,7 @@
    ============================================================ */
 'use strict';
 
-const APP_VERSION = '1.0.0';
+const APP_VERSION = '1.1.0';
 const K = { pref: 'splay_pref_v1', saved: 'splay_saved_v1', shield: 'splay_shield_v1' };
 
 /* Server pencarian (sudah diuji hidup & mengizinkan CORS) */
@@ -36,7 +36,7 @@ let prefs = loadJSON(K.pref, {});
 let saved = loadJSON(K.saved, []);
 let shield = loadJSON(K.shield, { ad: 0, other: 0 });
 if (!prefs.theme) prefs.theme = 'dark';
-if (!prefs.mode) prefs.mode = 'auto';
+delete prefs.mode; // v1.1.0: pemutar resmi beriklan dihapus total — tak ada mode lagi
 if (!prefs.region) prefs.region = 'ID';
 
 function loadJSON(key, fallback) {
@@ -48,7 +48,7 @@ function saveJSON(key, val) {
 }
 
 /* ---------------- Status aplikasi ---------------- */
-const state = { view: 'home', query: '', results: [], trendCache: {}, lastHealthy: null, playing: null, details: null, descOpen: false };
+const state = { view: 'home', query: '', results: [], trendCache: {}, lastHealthy: null, playing: null, details: null, descOpen: false, plans: [], planIdx: 0 };
 
 /* ---------------- Utilitas ---------------- */
 const NF = new Intl.NumberFormat('id-ID');
@@ -94,22 +94,38 @@ function syncThemeSeg() {
 
 /* ---------------- Perisai Sanusi (CSP) ---------------- */
 function updateShieldUI() {
-  $('shieldCount').textContent = NF.format(shield.ad);
+  const el = $('shieldCount'); if (el) el.textContent = NF.format(shield.ad);
   $('statAdBlocked').textContent = NF.format(shield.ad);
   $('statOtherBlocked').textContent = NF.format(shield.other);
   $('statWhitelisted').textContent = String(INSTANCES.length + 3);
 }
+function countViolation(uri) {
+  if (AD_PATTERN.test(String(uri))) {
+    shield.ad++; toast('🛡️ Iklan diblokir: ' + String(uri).replace(/^https?:\/\//, '').slice(0, 44));
+  } else {
+    shield.other++;
+  }
+  saveJSON(K.shield, shield);
+  updateShieldUI();
+}
 function watchShield() {
-  document.addEventListener('securitypolicyviolation', e => {
-    const uri = String(e.blockedURI || '');
-    if (AD_PATTERN.test(uri) || AD_PATTERN.test(String(e.violatedDirective || ''))) {
-      shield.ad++; toast('🛡️ Iklan diblokir: ' + uri.replace(/^https?:\/\//, '').slice(0, 44));
-    } else {
-      shield.other++;
+  document.addEventListener('securitypolicyviolation', e =>
+    countViolation(e.blockedURI || e.violatedDirective || ''));
+}
+/* Lapis ke-2: cegat di level JavaScript. Sekalipun ada kode jahat,
+   fetch() ke domain iklan ditolak SEBELUM keluar dari perangkat. */
+function installNetworkGuard() {
+  if (typeof window === 'undefined' || !window.fetch) return;
+  const real = window.fetch.bind(window);
+  window.fetch = function (input, init) {
+    let url = '';
+    try { url = typeof input === 'string' ? input : (input && input.url) || ''; } catch (e) { url = ''; }
+    if (url && AD_PATTERN.test(url)) {
+      countViolation(url);
+      return Promise.reject(new Error('Ditolak Perisai Mutlak Sanusi'));
     }
-    saveJSON(K.shield, shield);
-    updateShieldUI();
-  });
+    return real(input, init);
+  };
 }
 
 /* ---------------- Jaringan ---------------- */
@@ -166,48 +182,104 @@ function normList(inst, data) {
   const norm = inst.type === 'piped' ? normPipedItem : normInvItem;
   return raw.map(norm).filter(Boolean);
 }
-function pickMuxed(list) {
+function mediaKind(f) { return String((f && (f.mimeType || f.type)) || '').toLowerCase(); }
+function isAudioF(f) { return /^audio\//.test(mediaKind(f)); }
+function isVideoF(f) { return /^video\//.test(mediaKind(f)); }
+function isMp4(f) { return /mp4|m4a/.test(mediaKind(f)); }
+function qNum(f) {
+  if (!f) return 0;
+  const m = String(f.qualityLabel || f.quality || f.resolution || '').match(/\d{2,4}/);
+  return m ? parseInt(m[0], 10) : 0;
+}
+function pickBest(list, score) {
   const ok = (list || []).filter(f => f && f.url);
   if (!ok.length) return null;
-  const score = f => (/mp4/.test(f.mimeType || f.type || '') ? 1000 : 0) +
-    parseInt(String(f.qualityLabel || f.quality || '').match(/\d+/)?.[0] || '0', 10);
   return ok.slice().sort((a, b) => score(b) - score(a))[0];
 }
-function normDetails(inst, d, id) {
+/* Aliran gabungan (video+audio satu berkas) — paling andal, satu elemen saja */
+function pickMuxed(list) {
+  return pickBest(list, f => (isMp4(f) ? 1000 : 0) + qNum(f));
+}
+/* Aliran video-saja — untuk dipasangkan dengan aliran audio */
+function pickVideoOnly(list) {
+  return pickBest(list, f => (isMp4(f) ? 1000 : 0) + qNum(f));
+}
+/* Aliran audio-saja — utamakan m4a/mp4, lalu bitrate tertinggi */
+function pickAudioOnly(list) {
+  return pickBest(list, f => (isMp4(f) ? 1000 : 0) + Math.round((Number(f.bitrate) || 0) / 1000));
+}
+/* Kumpulkan semua kandidat aliran dari data Piped / Invidious */
+function collectStreams(inst, d) {
+  const muxed = [], video = [], audio = [];
+  const addMux = f => { if (f && f.url) muxed.push(f); };
   if (inst.type === 'invidious') {
-    const mux = pickMuxed(d.formatStreams);
-    const av = (d.authorThumbnails || []).slice(-1)[0];
-    return {
-      id, title: d.title || '', channel: d.author || '', channelId: d.authorId || '',
-      views: d.viewCount != null ? Number(d.viewCount) : null,
-      uploaded: d.publishedText || '',
-      desc: String(d.description || '').trim(),
-      avatar: av ? av.url : '',
-      muxedUrl: mux ? mux.url : '',
-      related: (d.recommendedVideos || []).map(r => ({
+    (d.formatStreams || []).forEach(addMux);
+    (d.adaptiveFormats || []).forEach(f => {
+      if (!f || !f.url) return;
+      if (isAudioF(f)) audio.push(f);
+      else if (isVideoF(f)) {
+        if (f.audioQuality && String(f.audioQuality).trim()) addMux(f); // adaptif bersuara → bisa diputar tunggal
+        else video.push(f);
+      }
+    });
+  } else {
+    (d.formatStreams || []).forEach(addMux);
+    (d.videoStreams || []).forEach(f => {
+      if (!f || !f.url) return;
+      if (isAudioF(f)) audio.push(f);
+      else if (f.videoOnly === true) video.push(f);
+      else addMux(f);
+    });
+    (d.audioStreams || []).forEach(f => { if (f && f.url) audio.push(f); });
+  }
+  return { muxed, video, audio };
+}
+/* Susun rencana pemutaran bebas iklan (urut prioritas). Semua lewat stream langsung. */
+function buildPlans(st) {
+  const mux = pickMuxed(st.muxed);
+  const vid = pickVideoOnly(st.video);
+  const aud = pickAudioOnly(st.audio);
+  const single = mux ? { kind: 'muxed', url: mux.url } : null;
+  const pair = (vid && aud) ? { kind: 'pair', url: vid.url, audio: aud.url } : null;
+  const plans = [];
+  if (single && pair) {
+    // Pasangan dipakai lebih dulu bila mutunya jauh lebih baik (mis. 1080p vs 360p)
+    if (qNum(vid) >= 720 && qNum(vid) > qNum(mux) + 180) plans.push(pair, single);
+    else plans.push(single, pair);
+  } else if (single) plans.push(single);
+  else if (pair) plans.push(pair);
+  return plans;
+}
+function normDetails(inst, d, id) {
+  const streams = collectStreams(inst, d);
+  const plans = buildPlans(streams);
+  const related = inst.type === 'invidious'
+    ? (d.recommendedVideos || []).map(r => ({
         id: r.videoId, title: r.title, channel: r.author,
         duration: Number(r.lengthSeconds) || 0,
         views: r.viewCount != null ? Number(r.viewCount) : null,
         uploaded: r.publishedText || ''
-      })).filter(r => extractId(r.id))
-    };
-  }
-  const mux = pickMuxed(d.formatStreams);
+      }))
+    : (d.relatedStreams || []).map(r => {
+        const rid = extractId(r.url);
+        return rid ? {
+          id: rid, title: r.title, channel: r.uploaderName || '',
+          duration: Number(r.duration) || 0,
+          views: r.views != null ? Number(r.views) : null, uploaded: ''
+        } : null;
+      });
+  const av = (d.authorThumbnails || []).slice(-1)[0];
   return {
-    id, title: d.title || '', channel: d.uploader || '', channelId: '',
-    views: d.views != null ? Number(d.views) : null,
-    uploaded: d.uploadDate || d.uploadedDate || '',
+    id, title: d.title || '',
+    channel: inst.type === 'invidious' ? (d.author || '') : (d.uploader || ''),
+    channelId: inst.type === 'invidious' ? (d.authorId || '') : '',
+    views: d.viewCount != null ? Number(d.viewCount) : (d.views != null ? Number(d.views) : null),
+    uploaded: d.publishedText || d.uploadDate || d.uploadedDate || '',
     desc: String(d.description || '').trim(),
-    avatar: d.uploaderAvatar || '',
-    muxedUrl: mux ? mux.url : '',
-    related: (d.relatedStreams || []).map(r => {
-      const rid = extractId(r.url);
-      return rid ? {
-        id: rid, title: r.title, channel: r.uploaderName || '',
-        duration: Number(r.duration) || 0,
-        views: r.views != null ? Number(r.views) : null, uploaded: ''
-      } : null;
-    }).filter(Boolean)
+    avatar: inst.type === 'invidious' ? (av ? av.url : '') : (d.uploaderAvatar || ''),
+    plans,
+    streamCount: streams.muxed.length + streams.video.length + streams.audio.length,
+    related: related.filter(r => r && extractId(r.id))
   };
 }
 
@@ -349,35 +421,93 @@ function syncSaveBtn() {
   btn.textContent = on ? '✔️ Tersimpan' : '🔖 Simpan';
 }
 
-/* ---------------- Pemutar ---------------- */
-function mountStream(url) {
-  $('playerStage').innerHTML =
-    `<video id="playerVideo" controls autoplay playsinline preload="metadata" src="${esc(url)}"></video>`;
-  const v = $('playerVideo');
-  v.addEventListener('error', () => fallbackToOfficial('Stream terputus — berpindah ke pemutar resmi'), { once: true });
-  try { const p = v.play(); if (p && p.catch) p.catch(() => {}); } catch (e) { /* browser menanganinya sendiri */ }
+/* ---------------- Pemutar: Perisai Mutlak (hanya aliran langsung, nol bingkai YouTube) ---------------- */
+function safePlay(el) {
+  try { const p = el && el.play(); if (p && p.catch) p.catch(() => {}); } catch (e) { /* autoplay ditolak browser */ }
 }
-function mountOfficial() {
-  const src = `https://www.youtube-nocookie.com/embed/${encodeURIComponent(state.playing)}?autoplay=1&rel=0&modestbranding=1&playsinline=1`;
-  $('playerStage').innerHTML =
-    `<iframe src="${src}" title="Pemutar video YouTube" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe>`;
-}
-function setBadge(kind) {
+function setBadge(kind, extra) {
   const b = $('playerModeBadge');
   b.className = 'mode-badge ' + kind;
-  b.textContent = kind === 'shield' ? '🛡️ IKLAN-NOL'
-    : kind === 'official' ? '▶ MODE RESMI'
+  b.textContent = kind === 'shield' ? '🛡️ IKLAN-NOL' + (extra ? ' · ' + extra : '')
+    : kind === 'error' ? '⛔ TERKUNCI'
     : 'MENYIAPKAN…';
 }
-function fallbackToOfficial(msg) {
-  if ($('playerStage').querySelector('iframe')) return;
-  setBadge('official');
-  mountOfficial();
-  if (msg) toast(msg);
+/* Rencana 1: satu aliran gabungan (video+audio) */
+function mountMuxed(plan, onFail) {
+  if (!plan || !plan.url) return false;
+  const stage = $('playerStage');
+  stage.dataset.mode = 'muxed';
+  stage.innerHTML = `<video id="playerVideo" controls autoplay playsinline preload="metadata" src="${esc(plan.url)}"></video>`;
+  const v = $('playerVideo');
+  v.addEventListener('error', () => onFail('Aliran gabungan gagal'), { once: true });
+  safePlay(v);
+  return true;
+}
+/* Rencana 2: dua aliran terpisah (video-saja + audio-saja) yang disinkronkan */
+function mountPair(plan, onFail) {
+  if (!plan || !plan.url || !plan.audio) return false;
+  const stage = $('playerStage');
+  stage.dataset.mode = 'pair';
+  stage.innerHTML =
+    `<video id="playerVideo" controls autoplay playsinline preload="metadata" src="${esc(plan.url)}"></video>` +
+    `<audio id="playerAudio" preload="auto" src="${esc(plan.audio)}" hidden></audio>`;
+  const v = $('playerVideo'), a = $('playerAudio');
+  let dead = false;
+  const fail = () => { if (!dead) { dead = true; onFail('Aliran video/audio gagal'); } };
+  v.addEventListener('error', fail, { once: true });
+  a.addEventListener('error', fail, { once: true });
+  const seekSync = () => { try { a.currentTime = v.currentTime; } catch (e) { /* abaikan */ } };
+  const driftSync = () => {
+    if (v.seeking) return;
+    if (Math.abs((a.currentTime || 0) - (v.currentTime || 0)) > 0.5) seekSync();
+  };
+  v.addEventListener('play', () => { seekSync(); safePlay(a); });
+  v.addEventListener('pause', () => { try { a.pause(); } catch (e) { /* abaikan */ } });
+  v.addEventListener('seeking', seekSync);
+  v.addEventListener('seeked', seekSync);
+  v.addEventListener('timeupdate', driftSync);
+  v.addEventListener('ratechange', () => { try { a.playbackRate = v.playbackRate; } catch (e) { /* abaikan */ } });
+  // Kontrol suara asli (volume/senyap) pada <video> diteruskan ke elemen audio
+  v.addEventListener('volumechange', () => { try { a.muted = v.muted; a.volume = v.volume; } catch (e) { /* abaikan */ } });
+  v.addEventListener('ended', () => { try { a.pause(); } catch (e) { /* abaikan */ } });
+  safePlay(v);
+  return true;
+}
+/* Semua jalur gagal → kartu galat (BUKAN pemutar YouTube beriklan) */
+function showStreamError(det) {
+  setBadge('error');
+  const stage = $('playerStage');
+  stage.dataset.mode = 'error';
+  const hint = det && det.streamCount
+    ? 'Jalur bebas iklan terputus — tautan stream mungkin kedaluwarsa atau jaringan tersendat.'
+    : 'Server tidak mengirim jalur video apa pun untuk tayangan ini.';
+  stage.innerHTML = `<div class="stage-error">
+      <span class="em">🛡️</span>
+      <b>Tidak ada jalur bebas iklan</b>
+      <small>${esc(hint)}</small>
+      <small>Perisai Mutlak menolak memutar lewat pemutar YouTube yang beriklan, agar <b>tak satu pun iklan lolos</b>.</small>
+      <div class="btn-col">
+        <button class="btn primary" type="button" data-retry="stream">🔄 Coba lagi</button>
+        <a class="btn ghost" href="https://www.youtube.com/watch?v=${esc((det && det.id) || state.playing || '')}" target="_blank" rel="noopener">Buka di YouTube ↗</a>
+      </div>
+    </div>`;
+}
+function tryPlan() {
+  const plan = (state.plans || [])[state.planIdx];
+  if (!plan) { showStreamError(state.details); return; }
+  setBadge('shield', plan.kind === 'pair' ? '2 ALIRAN' : '');
+  const onFail = () => {
+    if (state.planIdx + 1 < (state.plans || []).length) { state.planIdx++; tryPlan(); }
+    else showStreamError(state.details);
+  };
+  const ok = plan.kind === 'muxed' ? mountMuxed(plan, onFail) : mountPair(plan, onFail);
+  if (!ok) onFail();
 }
 async function startPlayback(meta) {
   state.playing = meta.id;
   state.descOpen = false;
+  state.plans = [];
+  state.planIdx = 0;
   $('plDesc').hidden = true;
   $('btnDesc').hidden = true;
   $('playerBarTitle').textContent = meta.title || 'Memuat…';
@@ -391,7 +521,7 @@ async function startPlayback(meta) {
   $('plAvatar').removeAttribute('src');
   syncSaveBtn();
   setBadge('wait');
-  $('playerStage').innerHTML = `<div class="stage-loading"><span class="spinner"></span><small>Menyiapkan pemutar…</small></div>`;
+  $('playerStage').innerHTML = `<div class="stage-loading"><span class="spinner"></span><small>Menyiapkan pemutar bebas iklan…</small></div>`;
   $('plRelated').innerHTML = '';
 
   let det = null;
@@ -411,16 +541,10 @@ async function startPlayback(meta) {
     renderGrid($('plRelated'), det.related.slice(0, 12));
   }
 
-  const wantShield = prefs.mode !== 'official';
-  if (wantShield && det && det.muxedUrl) {
-    setBadge('shield');
-    mountStream(det.muxedUrl);
-    if (prefs.mode === 'shield') toast('🛡️ Mode Iklan-Nol aktif');
-  } else {
-    if (prefs.mode === 'shield') toast('Stream tak tersedia → pemutar resmi');
-    setBadge('official');
-    mountOfficial();
-  }
+  state.plans = (det && det.plans) ? det.plans.slice() : [];
+  state.planIdx = 0;
+  if (state.plans.length) tryPlan();
+  else showStreamError(det);
 }
 function openPlayer(meta) {
   if (!meta || !meta.id) return;
@@ -431,9 +555,13 @@ function openPlayer(meta) {
 function closePlayer() {
   $('player').hidden = true;
   document.body.style.overflow = '';
-  $('playerStage').innerHTML = ''; // hentikan video/iframe
+  const stage = $('playerStage');
+  stage.innerHTML = ''; // hentikan video & audio
+  delete stage.dataset.mode;
   state.playing = null;
   state.details = null;
+  state.plans = [];
+  state.planIdx = 0;
   $('playerBarTitle').textContent = 'Memuat…';
 }
 function videoMetaFromId(id) {
@@ -462,8 +590,6 @@ function renderSettingsInfo() {
   $('regionSelect').value = prefs.region;
   updateShieldUI();
   syncThemeSeg();
-  document.querySelectorAll('#modeSeg button').forEach(b =>
-    b.classList.toggle('active', b.dataset.mode === prefs.mode));
 }
 function regionLabel(code) {
   const opt = [...$('regionSelect').options].find(o => o.value === code);
@@ -523,6 +649,7 @@ function wire() {
     if (retry) {
       if (retry.dataset.retry === 'trend') loadTrending(true);
       if (retry.dataset.retry === 'search') doSearch(state.query);
+      if (retry.dataset.retry === 'stream' && state.playing) startPlayback(videoMetaFromId(state.playing));
       return;
     }
     const card = e.target.closest('[data-vid]');
@@ -567,14 +694,6 @@ function wire() {
   });
 
   // Pengaturan
-  $('modeSeg').addEventListener('click', e => {
-    const b = e.target.closest('[data-mode]');
-    if (!b) return;
-    prefs.mode = b.dataset.mode;
-    saveJSON(K.pref, prefs);
-    renderSettingsInfo();
-    toast('Mode pemutar: ' + b.textContent);
-  });
   $('themeSeg').addEventListener('click', e => {
     const b = e.target.closest('[data-theme-choice]');
     if (!b) return;
@@ -652,6 +771,7 @@ function wire() {
 
 /* ---------------- Init ---------------- */
 function init() {
+  installNetworkGuard(); // lapis ke-2 dipasang sebelum permintaan apa pun
   applyTheme();
   wire();
   watchShield();
